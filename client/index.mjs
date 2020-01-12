@@ -1,6 +1,6 @@
 /// <reference types="@altv/types" />
 /// <reference types="@altv/native-types" />
-import * as alt from 'alt-client'
+import * as alt from 'alt'
 import * as game from 'natives';
 
 let chatActive = false;
@@ -139,3 +139,94 @@ function shiftHistoryUp() {
 function shiftHistoryDown() {
     webview.emit('chat:shiftHistoryDown');
 }
+
+
+alt.log('Client side has loaded!');
+
+const font = 0;
+
+var messages = [];
+
+function getNormalizedCoords(coords) {
+    if (coords instanceof alt.Player) {
+        return { x: coords.pos.x, y: coords.pos.y, z: coords.pos.z + 1.0 };
+    }
+    else {
+        return coords;
+    }
+}
+
+function getScaleFromDistance(coords, max_dist = 40.0) {
+    const cur_coords = game.getEntityCoords(game.getPlayerPed(alt.Player.local), false);
+    const distance = game.getDistanceBetweenCoords(coords.x, coords.y, coords.z, cur_coords.x, cur_coords.y, cur_coords.z, true);
+    const scale = ((max_dist - distance) / max_dist) - 0.5;
+    return scale < 0.0 ? 0.0 : scale;
+}
+
+function addMessage(_coords, _color = {r: 255, g: 0, b: 0, a: 255}, _message, _max_dist) {
+    messages[messages.length] = {message: _message, position: _coords, color: _color, max_dist: _max_dist, time: 10.0};
+}
+
+function removeMessage(i) {
+    messages[i] = null;
+    if (i+1 < messages.length) {
+        messages[i] = messages[i+1];
+        removeMessage(i+1);
+    }
+    else {
+        messages.length--;
+    }
+}
+
+function DrawText3d(msg, coords, color, scale, useOutline = true, useDropShadow = true, layer = 0 ) {
+    let hex = msg.match('{.*}');
+    if (hex) {
+        const rgb = hexToRgb(hex[0].replace('{', '').replace('}', ''));
+        r = rgb[0];
+        g = rgb[1];
+        b = rgb[2];
+        msg = msg.replace(hex[0], '');
+    }
+    game.getEntityCoords(game.getPlayerPed(alt.Player.local), false)
+    game.setDrawOrigin(coords.x, coords.y, coords.z, 0);
+    game.beginTextCommandDisplayText('STRING');
+    game.addTextComponentSubstringPlayerName(msg);
+    game.setTextFont(font);
+    game.setTextScale(1, scale);
+    game.setTextWrap(0.0, 1.0);
+    game.setTextCentre(true);
+    game.setTextColour(color.r, color.g, color.b, color.a);
+
+    if (useOutline) game.setTextOutline();
+
+    if (useDropShadow) game.setTextDropShadow();
+
+    game.endTextCommandDisplayText(0, 0);
+    game.clearDrawOrigin();
+}
+
+alt.onServer("add3DMessage", function(coords, color, msg, max_dist) {
+    addMessage(coords, color, msg, max_dist);
+});
+
+alt.everyTick(function() {
+    for (var i=0; i<messages.length; i++) {
+        const msg = messages[i];
+        if (msg != null) {
+            const coords = getNormalizedCoords(msg.position);
+            const scale = getScaleFromDistance(coords, msg.max_dist);
+            if (scale > 0.0) {
+                DrawText3d(msg.message, coords, msg.color, scale);
+            }
+        }
+    }
+});
+
+alt.setInterval(function() {
+    for (var i=0; i<messages.length; i++) {
+        messages[i].time -= 1.0;
+        if (messages[i].time <= 0.0) {
+            removeMessage(i);
+        }
+    }
+}, 1000);
